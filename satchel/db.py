@@ -7,8 +7,23 @@ it in sync on insert/update/delete so the two can't drift apart.
 """
 from __future__ import annotations
 
+import os
+import pathlib
 import sqlite3
 import time
+
+
+def default_db_path() -> str:
+    """Where satchel.db lives if --db isn't given: one stable, per-user
+    location instead of "whatever directory you happened to run the
+    command from" -- the latter means `satchel add` from ~/Downloads and
+    `satchel list` from ~ silently look at two different, disconnected
+    databases, which is indistinguishable from data loss to a new user.
+    Respects XDG_DATA_HOME; falls back to the XDG default location.
+    """
+    data_home = os.environ.get("XDG_DATA_HOME") or str(pathlib.Path.home() / ".local" / "share")
+    return str(pathlib.Path(data_home) / "satchel" / "satchel.db")
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS articles (
@@ -44,6 +59,9 @@ END;
 
 
 def connect(path: str) -> sqlite3.Connection:
+    parent = pathlib.Path(path).parent
+    if str(parent) not in ("", "."):
+        parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)

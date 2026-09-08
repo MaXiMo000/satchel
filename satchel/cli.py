@@ -7,37 +7,48 @@ import sys
 
 from . import db
 from .extract import extract
-from .fetch import fetch
-
-DEFAULT_DB = "satchel.db"
+from .fetch import fetch, normalize_url
 
 
 def _do_add(args) -> int:
     conn = db.connect(args.db)
+    url = normalize_url(args.url)
     try:
-        html = fetch(args.url)
+        html, final_url = fetch(url)
     except Exception as exc:  # noqa: BLE001 - a bad fetch is a clear error, not a crash
-        print(f"error: could not fetch {args.url}: {exc}", file=sys.stderr)
+        print(f"error: could not fetch {url}: {exc}", file=sys.stderr)
         return 1
+    # Normalize again after following redirects -- the URL actually served
+    # (past a shortener, or an http->https upgrade) is the real dedup key,
+    # not whatever was typed or clicked.
+    url = normalize_url(final_url)
 
-    article = extract(html, url=args.url)
+    article = extract(html, url=url)
     if article is None:
-        print(f"error: could not extract article text from {args.url}", file=sys.stderr)
+        print(f"error: could not extract article text from {url}", file=sys.stderr)
         return 1
 
     try:
-        article_id = db.add(conn, args.url, article["title"], article["author"], article["text"])
+        article_id = db.add(conn, url, article["title"], article["author"], article["text"])
     except sqlite3.IntegrityError:
-        print(f"already saved: {args.url}", file=sys.stderr)
+        print(f"already saved: {url}", file=sys.stderr)
         return 1
 
-    print(f"saved #{article_id}: {article['title'] or args.url}")
+    print(f"saved #{article_id}: {article['title'] or url}")
     return 0
 
 
 def _do_search(args) -> int:
     conn = db.connect(args.db)
-    rows = db.search(conn, args.query)
+    try:
+        rows = db.search(conn, args.query)
+    except sqlite3.OperationalError:
+        # FTS5's MATCH syntax (quotes, AND/OR/NOT, prefix *, column filters)
+        # is real query syntax a user can get wrong -- an unbalanced quote or
+        # a bare operator shouldn't surface as a Python traceback.
+        print(f"error: couldn't parse that search query: {args.query!r}", file=sys.stderr)
+        print("tip: quotes must be balanced; AND/OR/NOT/* are reserved words in FTS5 syntax", file=sys.stderr)
+        return 1
     if not rows:
         print("no matches")
         return 0
@@ -50,7 +61,7 @@ def _do_list(args) -> int:
     conn = db.connect(args.db)
     rows = db.list_all(conn)
     if not rows:
-        print("nothing saved yet")
+        print(f"nothing saved yet — try: satchel add <url>  (db: {args.db})")
         return 0
     for row in rows:
         print(f"#{row['id']:<4} {row['title'] or row['url']}  ({row['added_at']})")
@@ -73,7 +84,8 @@ def _do_read(args) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="satchel")
-    parser.add_argument("--db", default=DEFAULT_DB, help=f"path to the sqlite db (default: {DEFAULT_DB})")
+    parser.add_argument("--db", default=db.default_db_path(),
+                         help=f"path to the sqlite db (default: {db.default_db_path()})")
     sub = parser.add_subparsers(dest="command", required=True)
 
     add_p = sub.add_parser("add", help="fetch a URL, extract the article, save it")
