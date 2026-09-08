@@ -12,14 +12,17 @@ import os
 import pathlib
 import sys
 import tempfile
+import threading
 import unittest
+import urllib.error
+import urllib.request
 from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
 from satchel import cli, db
 from satchel.extract import extract
-from satchel.fetch import fetch, normalize_url
+from satchel.fetch import UnsafeURLError, fetch, normalize_url
 
 FIXTURE = (pathlib.Path(__file__).parent / "fixtures" / "article.html").read_text()
 
@@ -61,11 +64,75 @@ class TestFetch(unittest.TestCase):
         fake_response.__enter__.return_value = fake_response
         fake_response.__exit__.return_value = False
 
-        with mock.patch("urllib.request.urlopen", return_value=fake_response):
+        with mock.patch("urllib.request.OpenerDirector.open", return_value=fake_response):
             body, final_url = fetch("http://bit.ly/shortlink")
 
         self.assertEqual(body, b"<html></html>")
         self.assertEqual(final_url, "https://example.com/final")
+
+    def test_non_http_scheme_is_always_rejected_even_without_restriction(self):
+        # Scheme checking isn't part of restrict_private_network -- it's
+        # always on, for every caller, CLI included.
+        with self.assertRaises(UnsafeURLError):
+            fetch("file:///etc/passwd")
+
+    def test_ftp_scheme_is_rejected(self):
+        with self.assertRaises(UnsafeURLError):
+            fetch("ftp://example.com/a")
+
+    def test_unrestricted_fetch_allows_localhost(self):
+        # The plain CLI path (a human typing their own URL) is not the
+        # threat model restrict_private_network exists for -- a locally
+        # running dev server they want to save from must still work.
+        fake_response = mock.MagicMock()
+        fake_response.read.return_value = b"<html></html>"
+        fake_response.geturl.return_value = "http://127.0.0.1:3000/draft"
+        fake_response.__enter__.return_value = fake_response
+        fake_response.__exit__.return_value = False
+        with mock.patch("urllib.request.OpenerDirector.open", return_value=fake_response):
+            body, final_url = fetch("http://127.0.0.1:3000/draft")
+        self.assertEqual(final_url, "http://127.0.0.1:3000/draft")
+
+    def test_restricted_fetch_refuses_loopback(self):
+        with self.assertRaises(UnsafeURLError):
+            fetch("http://127.0.0.1:6379/", restrict_private_network=True)
+
+    def test_restricted_fetch_refuses_localhost_by_name(self):
+        with self.assertRaises(UnsafeURLError):
+            fetch("http://localhost/", restrict_private_network=True)
+
+    def test_restricted_fetch_refuses_cloud_metadata_link_local_address(self):
+        # 169.254.169.254 -- the AWS/GCP/Azure instance-metadata endpoint,
+        # the single most common real-world SSRF target.
+        with self.assertRaises(UnsafeURLError):
+            fetch("http://169.254.169.254/latest/meta-data/", restrict_private_network=True)
+
+    def test_restricted_fetch_refuses_rfc1918_private_range(self):
+        with self.assertRaises(UnsafeURLError):
+            fetch("http://10.0.0.5/internal", restrict_private_network=True)
+
+    def test_restricted_fetch_allows_a_real_public_address(self):
+        fake_response = mock.MagicMock()
+        fake_response.read.return_value = b"<html></html>"
+        fake_response.geturl.return_value = "https://example.com/a"
+        fake_response.__enter__.return_value = fake_response
+        fake_response.__exit__.return_value = False
+        with mock.patch("urllib.request.OpenerDirector.open", return_value=fake_response), \
+             mock.patch("socket.getaddrinfo", return_value=[(2, 1, 6, "", ("93.184.216.34", 0))]):
+            body, final_url = fetch("https://example.com/a", restrict_private_network=True)
+        self.assertEqual(final_url, "https://example.com/a")
+
+    def test_restricted_fetch_refuses_a_redirect_to_a_private_address(self):
+        # The initial URL is public; the *redirect target* is private. If
+        # only the first hop were checked, this would slip through --
+        # exercise the redirect handler directly rather than standing up a
+        # real HTTP server to prove the second hop, not just the first, is
+        # validated.
+        from satchel.fetch import _RestrictedRedirectHandler
+        handler = _RestrictedRedirectHandler()
+        req = urllib.request.Request("https://example.com/a")
+        with self.assertRaises(UnsafeURLError):
+            handler.redirect_request(req, None, 302, "Found", {}, "http://127.0.0.1/internal")
 
 
 class TestDefaultDbPath(unittest.TestCase):
@@ -168,7 +235,7 @@ class TestCliAdd(unittest.TestCase):
         return code, out.getvalue(), err.getvalue()
 
     def test_saved_url_is_the_post_redirect_canonical_one_not_the_tracking_link(self):
-        with mock.patch("satchel.cli.fetch",
+        with mock.patch("satchel.capture.fetch",
                          return_value=(FIXTURE.encode("utf-8"),
                                        "https://example.com/some-article?utm_source=twitter")):
             code, out, err = self._run("add", "http://bit.ly/shortlink")
@@ -179,7 +246,7 @@ class TestCliAdd(unittest.TestCase):
         self.assertEqual(row["url"], "https://example.com/some-article")
 
     def test_same_article_via_two_different_tracking_links_is_one_duplicate(self):
-        with mock.patch("satchel.cli.fetch",
+        with mock.patch("satchel.capture.fetch",
                          return_value=(FIXTURE.encode("utf-8"), "https://example.com/some-article")):
             code1, _, _ = self._run("add", "https://example.com/some-article?utm_source=twitter")
             code2, _, err2 = self._run("add", "https://example.com/some-article/?utm_campaign=newsletter")
@@ -222,6 +289,100 @@ class TestCli(unittest.TestCase):
         code, out, err = self._run("search", "-")
         self.assertEqual(code, 1)
         self.assertIn("couldn't parse", err)
+
+
+class TestServe(unittest.TestCase):
+    """Runs a real satchel.serve.serve() HTTPServer in a background thread
+    and hits it with real HTTP requests -- this is the capture listener a
+    bookmarklet actually talks to, so it's tested as one, not by calling
+    internal functions directly."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db_path = str(pathlib.Path(self.tmp.name) / "test.db")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    @contextlib.contextmanager
+    def _running_server(self):
+        import http.server
+
+        from satchel import serve as serve_module
+
+        token = "test-token-abc123"
+        with mock.patch("secrets.token_urlsafe", return_value=token):
+            handler_cls = serve_module._make_handler(self.db_path, token)
+        httpd = http.server.HTTPServer(("127.0.0.1", 0), handler_cls)
+        port = httpd.server_address[1]
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            yield port, token
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=2)
+
+    def _get(self, port: int, path: str) -> tuple[int, dict]:
+        import json
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=5) as resp:
+                return resp.status, json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read())
+
+    def test_wrong_token_is_refused(self):
+        with self._running_server() as (port, token):
+            status, body = self._get(port, "/add?token=wrong&url=https://example.com/a")
+        self.assertEqual(status, 403)
+        self.assertFalse(body["ok"])
+
+    def test_missing_token_is_refused(self):
+        with self._running_server() as (port, token):
+            status, body = self._get(port, "/add?url=https://example.com/a")
+        self.assertEqual(status, 403)
+
+    def test_missing_url_is_a_clean_400(self):
+        with self._running_server() as (port, token):
+            status, body = self._get(port, f"/add?token={token}")
+        self.assertEqual(status, 400)
+        self.assertIn("no url", body["message"])
+
+    def test_unknown_path_is_404(self):
+        with self._running_server() as (port, token):
+            status, body = self._get(port, "/whatever")
+        self.assertEqual(status, 404)
+
+    def test_valid_capture_saves_the_article(self):
+        with mock.patch("satchel.capture.fetch",
+                         return_value=(FIXTURE.encode("utf-8"), "https://example.com/some-article")):
+            with self._running_server() as (port, token):
+                status, body = self._get(
+                    port, f"/add?token={token}&url=https://example.com/some-article")
+        self.assertEqual(status, 200)
+        self.assertTrue(body["ok"])
+
+        conn = db.connect(self.db_path)
+        self.assertEqual(len(db.list_all(conn)), 1)
+
+    def test_capture_of_a_private_network_url_is_refused_even_with_a_valid_token(self):
+        # The listener always calls add_article with restrict_private_
+        # network=True -- a page's bookmarklet cannot use satchel as an
+        # SSRF pivot into the local network, token or no token.
+        with self._running_server() as (port, token):
+            status, body = self._get(
+                port, f"/add?token={token}&url=http://169.254.169.254/latest/meta-data/")
+        self.assertEqual(status, 400)
+        self.assertFalse(body["ok"])
+        self.assertIn("resolves to a non-public address", body["message"])
+
+    def test_bookmarklet_contains_the_real_port_and_token(self):
+        from satchel.serve import _bookmarklet
+        js = _bookmarklet(8765, "abc123")
+        self.assertIn("127.0.0.1:8765", js)
+        self.assertIn("abc123", js)
+        self.assertTrue(js.startswith("javascript:"))
 
 
 if __name__ == "__main__":

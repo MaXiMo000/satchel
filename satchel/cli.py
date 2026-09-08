@@ -1,4 +1,4 @@
-"""satchel add <url> | search <query> | list | read <id>"""
+"""satchel add <url> | search <query> | list | read <id> | serve"""
 from __future__ import annotations
 
 import argparse
@@ -6,36 +6,15 @@ import sqlite3
 import sys
 
 from . import db
-from .extract import extract
-from .fetch import fetch, normalize_url
+from .capture import add_article
+from .serve import DEFAULT_PORT, serve
 
 
 def _do_add(args) -> int:
     conn = db.connect(args.db)
-    url = normalize_url(args.url)
-    try:
-        html, final_url = fetch(url)
-    except Exception as exc:  # noqa: BLE001 - a bad fetch is a clear error, not a crash
-        print(f"error: could not fetch {url}: {exc}", file=sys.stderr)
-        return 1
-    # Normalize again after following redirects -- the URL actually served
-    # (past a shortener, or an http->https upgrade) is the real dedup key,
-    # not whatever was typed or clicked.
-    url = normalize_url(final_url)
-
-    article = extract(html, url=url)
-    if article is None:
-        print(f"error: could not extract article text from {url}", file=sys.stderr)
-        return 1
-
-    try:
-        article_id = db.add(conn, url, article["title"], article["author"], article["text"])
-    except sqlite3.IntegrityError:
-        print(f"already saved: {url}", file=sys.stderr)
-        return 1
-
-    print(f"saved #{article_id}: {article['title'] or url}")
-    return 0
+    result = add_article(conn, args.url)
+    print(result["message"], file=sys.stdout if result["ok"] else sys.stderr)
+    return 0 if result["ok"] else 1
 
 
 def _do_search(args) -> int:
@@ -82,6 +61,10 @@ def _do_read(args) -> int:
     return 0
 
 
+def _do_serve(args) -> int:
+    return serve(args.db, port=args.port)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="satchel")
     parser.add_argument("--db", default=db.default_db_path(),
@@ -102,6 +85,11 @@ def main(argv: list[str] | None = None) -> int:
     read_p = sub.add_parser("read", help="print a saved article's full text")
     read_p.add_argument("id", type=int)
     read_p.set_defaults(func=_do_read)
+
+    serve_p = sub.add_parser("serve", help="run a local listener + bookmarklet for one-click capture")
+    serve_p.add_argument("--port", type=int, default=DEFAULT_PORT,
+                          help=f"port to listen on (default: {DEFAULT_PORT})")
+    serve_p.set_defaults(func=_do_serve)
 
     args = parser.parse_args(argv)
     return args.func(args)
