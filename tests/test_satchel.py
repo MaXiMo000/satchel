@@ -384,6 +384,21 @@ class TestServe(unittest.TestCase):
         self.assertIn("abc123", js)
         self.assertTrue(js.startswith("javascript:"))
 
+    def test_port_already_in_use_is_a_clean_error_not_a_crash(self):
+        # A previous `serve` still running, or anything else already
+        # listening on the port, must not surface a raw OSError traceback.
+        import contextlib as _ctx
+        import io as _io
+
+        from satchel.serve import serve as serve_fn
+
+        with self._running_server() as (busy_port, _token):
+            out, err = _io.StringIO(), _io.StringIO()
+            with _ctx.redirect_stdout(out), _ctx.redirect_stderr(err):
+                code = serve_fn(self.db_path, port=busy_port)
+        self.assertEqual(code, 1)
+        self.assertIn("could not listen", err.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
