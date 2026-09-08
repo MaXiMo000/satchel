@@ -70,7 +70,6 @@ as separate elements) rather than loosening the assertion.
 
 No tagging, no folders, no read/unread state, no browser extension to save
 a page with one click (this is a CLI you point at a URL). No sync between
-devices — it's one local file on purpose. See `PLAN.md` for what a next
-session would tackle first.
+devices — it's one local file on purpose.
 
 MIT licensed.
