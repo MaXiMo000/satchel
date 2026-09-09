@@ -1,5 +1,10 @@
 [project]
-name = "satchel"
+# The command stays `satchel`; the distribution cannot -- that name is
+# already taken on PyPI by an unrelated, abandoned package (a single empty
+# "1.0" release from 2018, "Development Status :: 1 - Planning"). A
+# distribution name differing from the command it installs is ordinary
+# (python-dateutil installs `dateutil`).
+name = "satchel-reader"
 version = "0.1.0"
 description = "A local-first reading queue: saves the real article text, not just the link, and makes it genuinely offline-searchable."
 requires-python = ">=3.10"
@@ -21,13 +26,19 @@ classifiers = [
 # (urllib) since a plain GET doesn't need a dependency.
 dependencies = ["trafilatura>=2.0"]
 
+urls.Homepage = "https://github.com/MaXiMo000/satchel"
 urls.Source = "https://github.com/MaXiMo000/satchel"
+urls.Issues = "https://github.com/MaXiMo000/satchel/issues"
+urls.Changelog = "https://github.com/MaXiMo000/satchel/releases"
 
 [project.scripts]
 satchel = "satchel.cli:main"
 
 [build-system]
-requires = ["setuptools>=68"]
+# 77 is the floor for PEP 639 (`license = "MIT"` as an SPDX expression). On
+# 68 a clean build environment can reject it -- learned the hard way in a
+# sibling project's own release workflow, fixed here before it bites this one.
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

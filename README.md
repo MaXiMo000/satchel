@@ -51,6 +51,12 @@ saved through the exact same pipeline `add` uses. See "Capture" below.
 ## Install
 
 ```bash
+pip install satchel-reader        # the command it installs is `satchel`
+```
+
+Or from a checkout, for development:
+
+```bash
 pip install -e .
 ```
 
