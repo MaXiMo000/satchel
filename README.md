@@ -25,6 +25,37 @@ by Jordan Rivers
 Most reading tools save a link and call it done...
 ```
 
+## Leaving Pocket or Omnivore? Bring everything.
+
+Pocket shut down in 2025 and Omnivore in 2024; both left their users an
+export file and nowhere to put it. `satchel import` takes that file as-is:
+
+```
+$ satchel import reading-list.txt
+urls export: 3 item(s)
+saved 2 (0 from the export itself, 1 rescued from the Wayback Machine), 0 already saved, 1 failed
+  failed: https://this-domain-does-not-exist-satchel-test.invalid/post  (URLError: ...)
+```
+
+(Real output. The rescued one is Omnivore's own shutdown announcement,
+404 on the live site today; the failure is a domain that never existed.)
+
+| export | what happens |
+|---|---|
+| **Omnivore** `.zip` (or the unzipped folder) | the article text is already in the export -- saved instantly, no network |
+| **Pocket** CSV, or the older `ril_export.html` | every link fetched and extracted |
+| **Instapaper** CSV | same |
+| **Browser bookmarks** `.html` (Chrome, Firefox, Safari, Edge) | same |
+| a text file, one URL per line | same |
+
+Links saved years ago are often dead. When the live page is gone, satchel
+fetches the closest **Wayback Machine** snapshot instead, so link rot
+doesn't mean the article is lost (`--no-wayback` to skip it). Each article
+keeps the date you originally saved it, duplicates are skipped (so running
+the same import twice is safe), and every link that still couldn't be
+saved is listed with the reason (`--failures failed.txt` writes them all
+to a file). Fetches run in parallel (`--workers`, default 8).
+
 Save with one click instead of a terminal: `satchel serve` runs a local
 listener and prints a bookmarklet — click it on any page and that page is
 saved through the exact same pipeline `add` uses. See "Capture" below.
@@ -64,6 +95,7 @@ pip install -e .
 
 ```bash
 satchel add <url>          # fetch, extract, save
+satchel import <file>       # a Pocket/Omnivore/Instapaper/bookmarks export -- see above
 satchel list                # everything saved
 satchel search <query>      # full-text search
 satchel read <id>           # print an article's full text
@@ -134,6 +166,7 @@ yourself.
 
 ```bash
 python tests/test_satchel.py
+python tests/test_import.py     # every export format + the import pipeline, network mocked
 ```
 
 Extraction is tested against a fixture HTML file (`tests/fixtures/`), not
@@ -152,7 +185,7 @@ whether the door itself works.
 
 ## What's deliberately not here yet
 
-No tagging, no folders, no read/unread state — a flat list plus full-text
+No tags (an import doesn't bring Pocket tags over yet), no folders, no read/unread state — a flat list plus full-text
 search covers the actual workflow (encounter → capture → search → read);
 add these when a flat list genuinely stops being enough, not before. No
 multi-device sync — one local file is the whole pitch, and sync is a

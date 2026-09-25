@@ -1,12 +1,15 @@
-"""satchel add <url> | search <query> | list | read <id> | serve"""
+"""satchel add <url> | import <file> | search <query> | list | read <id> | serve"""
 from __future__ import annotations
 
 import argparse
+import json
 import sqlite3
 import sys
+import zipfile
 
 from . import db
 from .capture import add_article
+from .importers import parse_export, run_import
 from .serve import DEFAULT_PORT, serve
 
 
@@ -73,6 +76,38 @@ def _do_read(args) -> int:
     return 0
 
 
+def _do_import(args) -> int:
+    try:
+        kind, items = parse_export(args.file)
+    except (OSError, ValueError, UnicodeDecodeError, json.JSONDecodeError, zipfile.BadZipFile) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"{kind} export: {len(items)} item(s)")
+    if not items:
+        return 1
+    conn = db.connect(args.db)
+    try:
+        progress = (lambda msg: print(msg, file=sys.stderr)) if args.verbose else None
+        result = run_import(conn, items, wayback=not args.no_wayback,
+                            workers=args.workers, progress=progress)
+    finally:
+        conn.close()
+    print(f"saved {result['saved']} ({result['from_export']} from the export itself, "
+          f"{result['from_wayback']} rescued from the Wayback Machine), "
+          f"{result['skipped']} already saved, {result['failed']} failed")
+    if result["failures"]:
+        if args.failures:
+            with open(args.failures, "w", encoding="utf-8") as f:
+                f.writelines(f"{url}\t{reason}\n" for url, reason in result["failures"])
+            print(f"failures listed in {args.failures}")
+        else:
+            for url, reason in result["failures"][:20]:
+                print(f"  failed: {url}  ({reason})", file=sys.stderr)
+            if len(result["failures"]) > 20:
+                print(f"  ... and {len(result['failures']) - 20} more (use --failures FILE)", file=sys.stderr)
+    return 0
+
+
 def _do_serve(args) -> int:
     return serve(args.db, port=args.port)
 
@@ -97,6 +132,16 @@ def main(argv: list[str] | None = None) -> int:
     read_p = sub.add_parser("read", help="print a saved article's full text")
     read_p.add_argument("id", type=int)
     read_p.set_defaults(func=_do_read)
+
+    import_p = sub.add_parser(
+        "import", help="import a Pocket, Omnivore, Instapaper, bookmarks or URL-list export")
+    import_p.add_argument("file", help="the export file (.csv, .html, .zip, .txt) or unzipped Omnivore folder")
+    import_p.add_argument("--no-wayback", action="store_true",
+                          help="don't fall back to the Wayback Machine when a link is dead")
+    import_p.add_argument("--workers", type=int, default=8, help="parallel fetches (default: 8)")
+    import_p.add_argument("--failures", metavar="FILE", help="write every failed URL and why to FILE")
+    import_p.add_argument("-v", "--verbose", action="store_true", help="print each URL as it's fetched")
+    import_p.set_defaults(func=_do_import)
 
     serve_p = sub.add_parser("serve", help="run a local listener + bookmarklet for one-click capture")
     serve_p.add_argument("--port", type=int, default=DEFAULT_PORT,

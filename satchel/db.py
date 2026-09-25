@@ -68,16 +68,24 @@ def connect(path: str) -> sqlite3.Connection:
     return conn
 
 
-def add(conn: sqlite3.Connection, url: str, title: str | None, author: str | None, text: str) -> int:
+def add(conn: sqlite3.Connection, url: str, title: str | None, author: str | None, text: str,
+        added_at: str | None = None) -> int:
     """Returns the article's id. Raises sqlite3.IntegrityError if the url
     is already saved -- the caller decides what "already have this" means
-    to them (skip, re-fetch, update), this layer doesn't guess."""
+    to them (skip, re-fetch, update), this layer doesn't guess.
+
+    added_at defaults to now; an import passes the date the article was
+    originally saved elsewhere, so a 2016 Pocket save doesn't read as new."""
     cur = conn.execute(
         "INSERT INTO articles (url, title, author, text, added_at) VALUES (?, ?, ?, ?, ?)",
-        (url, title, author, text, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())),
+        (url, title, author, text, added_at or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())),
     )
     conn.commit()
     return cur.lastrowid
+
+
+def saved_urls(conn: sqlite3.Connection) -> set[str]:
+    return {row[0] for row in conn.execute("SELECT url FROM articles")}
 
 
 def get(conn: sqlite3.Connection, article_id: int) -> sqlite3.Row | None:

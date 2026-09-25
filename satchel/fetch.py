@@ -3,12 +3,14 @@ when extraction (the actually hard part) already needs one.
 """
 from __future__ import annotations
 
+import gzip
 import ipaddress
 import socket
 import urllib.request
+import zlib
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-_USER_AGENT = "satchel/0.1 (personal reading queue; +https://github.com/MaXiMo000/satchel)"
+_USER_AGENT = "satchel (personal reading queue; +https://github.com/MaXiMo000/satchel)"
 
 _ALLOWED_SCHEMES = {"http", "https"}
 
@@ -112,4 +114,17 @@ def fetch(url: str, timeout: float = 15.0, restrict_private_network: bool = Fals
         opener = urllib.request.build_opener()
     req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
     with opener.open(req, timeout=timeout) as resp:
-        return resp.read(), resp.geturl()
+        body = resp.read()
+        # Some servers compress even when the request never asked (the
+        # Wayback Machine does), and urllib doesn't undo it. Handed on
+        # compressed, extraction mis-guessed the charset and every curly
+        # quote in the article became U+FFFD.
+        encoding = (resp.headers.get("Content-Encoding") or "").strip().lower()
+        if encoding in ("gzip", "x-gzip"):
+            body = gzip.decompress(body)
+        elif encoding == "deflate":
+            try:
+                body = zlib.decompress(body)
+            except zlib.error:
+                body = zlib.decompress(body, -zlib.MAX_WBITS)  # raw deflate, no zlib header
+        return body, resp.geturl()
