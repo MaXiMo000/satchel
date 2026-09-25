@@ -243,6 +243,7 @@ class TestCliAdd(unittest.TestCase):
 
         conn = db.connect(self.db_path)
         row = db.get(conn, 1)
+        conn.close()
         self.assertEqual(row["url"], "https://example.com/some-article")
 
     def test_same_article_via_two_different_tracking_links_is_one_duplicate(self):
@@ -256,7 +257,9 @@ class TestCliAdd(unittest.TestCase):
         self.assertIn("already saved", err2)
 
         conn = db.connect(self.db_path)
-        self.assertEqual(len(db.list_all(conn)), 1)
+        count = len(db.list_all(conn))
+        conn.close()
+        self.assertEqual(count, 1)
 
 
 class TestCli(unittest.TestCase):
@@ -364,7 +367,9 @@ class TestServe(unittest.TestCase):
         self.assertTrue(body["ok"])
 
         conn = db.connect(self.db_path)
-        self.assertEqual(len(db.list_all(conn)), 1)
+        count = len(db.list_all(conn))
+        conn.close()
+        self.assertEqual(count, 1)
 
     def test_capture_of_a_private_network_url_is_refused_even_with_a_valid_token(self):
         # The listener always calls add_article with restrict_private_

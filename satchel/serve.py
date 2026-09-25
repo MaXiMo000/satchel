@@ -82,10 +82,26 @@ def _make_handler(db_path: str, token: str) -> type[http.server.BaseHTTPRequestH
     return Handler
 
 
+class _StrictPortServer(http.server.HTTPServer):
+    """HTTPServer, but refuse to silently share a port that's already bound.
+
+    Stdlib's HTTPServer sets allow_reuse_address = 1 (SO_REUSEADDR) to let a
+    restarted server reclaim a socket still in TIME_WAIT on POSIX. Windows
+    gives SO_REUSEADDR much looser semantics: it lets a *second* listener
+    bind to a port an existing process is actively listening on, rather than
+    raising -- so two `satchel serve` runs on the same port would silently
+    both come up on Windows instead of the second one failing loud the way
+    it does everywhere else. Not worth the TIME_WAIT convenience for a
+    personal tool restarted rarely.
+    """
+
+    allow_reuse_address = False
+
+
 def serve(db_path: str, port: int = DEFAULT_PORT) -> int:
     token = secrets.token_urlsafe(16)
     try:
-        httpd = http.server.HTTPServer(("127.0.0.1", port), _make_handler(db_path, token))
+        httpd = _StrictPortServer(("127.0.0.1", port), _make_handler(db_path, token))
     except OSError as exc:
         print(f"error: could not listen on 127.0.0.1:{port}: {exc}", file=sys.stderr)
         return 1

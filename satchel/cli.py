@@ -12,7 +12,10 @@ from .serve import DEFAULT_PORT, serve
 
 def _do_add(args) -> int:
     conn = db.connect(args.db)
-    result = add_article(conn, args.url)
+    try:
+        result = add_article(conn, args.url)
+    finally:
+        conn.close()
     print(result["message"], file=sys.stdout if result["ok"] else sys.stderr)
     return 0 if result["ok"] else 1
 
@@ -20,14 +23,17 @@ def _do_add(args) -> int:
 def _do_search(args) -> int:
     conn = db.connect(args.db)
     try:
-        rows = db.search(conn, args.query)
-    except sqlite3.OperationalError:
-        # FTS5's MATCH syntax (quotes, AND/OR/NOT, prefix *, column filters)
-        # is real query syntax a user can get wrong -- an unbalanced quote or
-        # a bare operator shouldn't surface as a Python traceback.
-        print(f"error: couldn't parse that search query: {args.query!r}", file=sys.stderr)
-        print("tip: quotes must be balanced; AND/OR/NOT/* are reserved words in FTS5 syntax", file=sys.stderr)
-        return 1
+        try:
+            rows = db.search(conn, args.query)
+        except sqlite3.OperationalError:
+            # FTS5's MATCH syntax (quotes, AND/OR/NOT, prefix *, column filters)
+            # is real query syntax a user can get wrong -- an unbalanced quote or
+            # a bare operator shouldn't surface as a Python traceback.
+            print(f"error: couldn't parse that search query: {args.query!r}", file=sys.stderr)
+            print("tip: quotes must be balanced; AND/OR/NOT/* are reserved words in FTS5 syntax", file=sys.stderr)
+            return 1
+    finally:
+        conn.close()
     if not rows:
         print("no matches")
         return 0
@@ -38,7 +44,10 @@ def _do_search(args) -> int:
 
 def _do_list(args) -> int:
     conn = db.connect(args.db)
-    rows = db.list_all(conn)
+    try:
+        rows = db.list_all(conn)
+    finally:
+        conn.close()
     if not rows:
         print(f"nothing saved yet — try: satchel add <url>  (db: {args.db})")
         return 0
@@ -49,7 +58,10 @@ def _do_list(args) -> int:
 
 def _do_read(args) -> int:
     conn = db.connect(args.db)
-    row = db.get(conn, args.id)
+    try:
+        row = db.get(conn, args.id)
+    finally:
+        conn.close()
     if row is None:
         print(f"error: no article #{args.id}", file=sys.stderr)
         return 1
