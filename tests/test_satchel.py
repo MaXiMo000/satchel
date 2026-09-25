@@ -138,14 +138,17 @@ class TestFetch(unittest.TestCase):
 class TestDefaultDbPath(unittest.TestCase):
     def test_respects_xdg_data_home(self):
         with mock.patch.dict(os.environ, {"XDG_DATA_HOME": "/tmp/xdg-test-home"}):
-            self.assertEqual(db.default_db_path(), "/tmp/xdg-test-home/satchel/satchel.db")
+            # Compared as paths: on Windows the same path is spelled with backslashes.
+            self.assertEqual(pathlib.PurePath(db.default_db_path()),
+                             pathlib.PurePath("/tmp/xdg-test-home/satchel/satchel.db"))
 
     def test_falls_back_to_xdg_default_when_unset(self):
         env = dict(os.environ)
         env.pop("XDG_DATA_HOME", None)
         with mock.patch.dict(os.environ, env, clear=True):
             path = db.default_db_path()
-            self.assertTrue(path.endswith(".local/share/satchel/satchel.db"))
+            self.assertEqual(pathlib.PurePath(path).parts[-4:],
+                             (".local", "share", "satchel", "satchel.db"))
 
     def test_connect_creates_missing_parent_directories(self):
         with tempfile.TemporaryDirectory() as tmp:
