@@ -113,6 +113,12 @@ def _do_serve(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Piped on Windows, stdout is cp1252, and `satchel read 4 > out.txt` on a
+    # Wikipedia article died on its first IPA character. Articles are UTF-8;
+    # so is what satchel writes.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(prog="satchel")
     parser.add_argument("--db", default=db.default_db_path(),
                          help=f"path to the sqlite db (default: {db.default_db_path()})")
