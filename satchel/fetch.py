@@ -85,6 +85,16 @@ def normalize_url(url: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, path, query, ""))
 
 
+def _tls() -> urllib.request.HTTPSHandler:
+    """Certificates checked by the operating system's own verifier, the way
+    a browser checks them. OpenSSL's store alone refused arxiv.org on
+    Windows ("unable to get local issuer certificate") because it does not
+    fetch a missing intermediate; the OS does. Same library pip uses."""
+    import ssl
+    import truststore
+    return urllib.request.HTTPSHandler(context=truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT))
+
+
 def fetch(url: str, timeout: float = 15.0, restrict_private_network: bool = False) -> tuple[bytes, str]:
     """Returns (raw bytes, the final URL after any redirects).
 
@@ -109,9 +119,9 @@ def fetch(url: str, timeout: float = 15.0, restrict_private_network: bool = Fals
     _check_scheme(url)
     if restrict_private_network:
         _check_not_private(url)
-        opener = urllib.request.build_opener(_RestrictedRedirectHandler)
+        opener = urllib.request.build_opener(_RestrictedRedirectHandler, _tls())
     else:
-        opener = urllib.request.build_opener()
+        opener = urllib.request.build_opener(_tls())
     req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
     with opener.open(req, timeout=timeout) as resp:
         body = resp.read()

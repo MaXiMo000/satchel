@@ -5,6 +5,7 @@ exactly one add pipeline, not two that can drift apart.
 from __future__ import annotations
 
 import sqlite3
+import urllib.error
 
 from . import db
 from .extract import extract
@@ -24,8 +25,19 @@ def add_article(conn: sqlite3.Connection, raw_url: str, *, restrict_private_netw
     for.
     """
     url = normalize_url(raw_url)
+    source = ""
     try:
         html, final_url = fetch(url, restrict_private_network=restrict_private_network)
+    except urllib.error.HTTPError as exc:
+        # The server answered and refused -- StackOverflow sends 403 to
+        # anything that is not a browser. The page is public, so its
+        # archived copy is the honest next place to look. Only on an HTTP
+        # answer: a URL that never connected may be an intranet address,
+        # and asking archive.org about it would leak it.
+        found = _from_wayback(url) if exc.code in _REFUSED or exc.code >= 500 else None
+        if found is None:
+            return {"ok": False, "message": f"could not fetch {url}: {exc}", "id": None}
+        html, final_url, source = *found, " (from the Wayback Machine; the live site refused)"
     except Exception as exc:  # noqa: BLE001 - a bad/unsafe fetch is a clear result, not a crash
         return {"ok": False, "message": f"could not fetch {url}: {exc}", "id": None}
     # Normalize again after following redirects -- the URL actually served
@@ -41,4 +53,17 @@ def add_article(conn: sqlite3.Connection, raw_url: str, *, restrict_private_netw
     except sqlite3.IntegrityError:
         return {"ok": False, "message": f"already saved: {url}", "id": None}
 
-    return {"ok": True, "message": f"saved #{article_id}: {article['title'] or url}", "id": article_id}
+    return {"ok": True, "message": f"saved #{article_id}: {article['title'] or url}{source}", "id": article_id}
+
+
+_REFUSED = {403, 404, 410, 429, 451}
+
+
+def _from_wayback(url: str) -> tuple[bytes, str] | None:
+    """(html, the original url) from the closest archived copy, or None."""
+    from .importers import wayback_snapshot
+    try:
+        snap = wayback_snapshot(url)
+        return (fetch(snap)[0], url) if snap else None
+    except Exception:  # noqa: BLE001 - the archive being down is just "not found"
+        return None
