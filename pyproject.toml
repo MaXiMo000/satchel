@@ -5,7 +5,7 @@
 # distribution name differing from the command it installs is ordinary
 # (python-dateutil installs `dateutil`).
 name = "satchel-reader"
-version = "0.2.0"
+version = "0.3.0"
 description = "A local-first reading queue: saves the real article text, not just the link, and makes it genuinely offline-searchable."
 requires-python = ">=3.10"
 readme = "README.md"
@@ -24,7 +24,7 @@ classifiers = [
 # of thing that looks fine on one test page and breaks on the next real
 # site's markup -- not worth reimplementing. Fetching itself stays stdlib
 # (urllib) since a plain GET doesn't need a dependency.
-dependencies = ["trafilatura>=2.0"]
+dependencies = ["trafilatura>=2.0", "truststore>=0.10"]
 
 urls.Homepage = "https://github.com/MaXiMo000/satchel"
 urls.Source = "https://github.com/MaXiMo000/satchel"

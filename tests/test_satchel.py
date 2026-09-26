@@ -135,6 +135,48 @@ class TestFetch(unittest.TestCase):
             handler.redirect_request(req, None, 302, "Found", {}, "http://127.0.0.1/internal")
 
 
+class TestWaybackFallback(unittest.TestCase):
+    """StackOverflow answers 403 to anything that is not a browser. A
+    refusal falls back to the archived copy; a URL that never connected
+    is not sent to archive.org at all."""
+
+    def _add(self, fetch_error):
+        import sqlite3
+        import urllib.error
+        from satchel import capture
+        conn = sqlite3.connect(":memory:")
+        calls = []
+
+        def fake_fetch(url, **kw):
+            if "web.archive.org" in url:
+                return b"<html>archived</html>", url
+            raise fetch_error
+
+        def fake_wayback(url):
+            calls.append(url)
+            return "https://web.archive.org/web/2024id_/" + url
+
+        from satchel import importers
+        with mock.patch.object(capture, "fetch", fake_fetch), \
+             mock.patch.object(importers, "wayback_snapshot", fake_wayback), \
+             mock.patch.object(capture, "extract", lambda html, url: {"title": "T", "author": None, "text": "x"}), \
+             mock.patch.object(capture.db, "add", lambda *a, **k: 7):
+            return capture.add_article(conn, "https://stackoverflow.com/q/1"), calls
+
+    def test_a_refusal_uses_the_archived_copy_and_says_so(self):
+        import urllib.error
+        result, calls = self._add(urllib.error.HTTPError("u", 403, "Forbidden", {}, None))
+        self.assertTrue(result["ok"])
+        self.assertIn("Wayback", result["message"])
+        self.assertEqual(calls, ["https://stackoverflow.com/q/1"])
+
+    def test_a_connection_failure_never_asks_archive_org(self):
+        import urllib.error
+        result, calls = self._add(urllib.error.URLError("no route to host"))
+        self.assertFalse(result["ok"])
+        self.assertEqual(calls, [])
+
+
 class TestDefaultDbPath(unittest.TestCase):
     def test_respects_xdg_data_home(self):
         with mock.patch.dict(os.environ, {"XDG_DATA_HOME": "/tmp/xdg-test-home"}):

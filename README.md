@@ -115,6 +115,21 @@ redirects, and normalizes the *actual* address the server served before
 checking for a duplicate: it defers to what the server says, rather than
 guessing at a scheme policy.
 
+Checked against twelve real pages -- Paul Graham, Martin Fowler, Dan Luu,
+Wikipedia, the Cloudflare and GitHub blogs, Joel Spolsky, Julia Evans,
+Simon Willison, Hacker News, arXiv and StackOverflow -- all twelve save.
+Two needed fixes to get there:
+
+- **arXiv** failed certificate verification on Windows: OpenSSL's store
+  alone doesn't fetch a missing intermediate the way a browser does.
+  Certificates are now checked by the operating system's own verifier
+  ([truststore](https://github.com/sethmlarson/truststore), as pip does).
+- **StackOverflow** answers 403 to anything that isn't a browser. When a
+  site *answers* and refuses (403, 404, 410, 429, 451, 5xx), `add` saves
+  the Wayback Machine's copy instead and says so in its output. A URL
+  that never connected is never sent to archive.org -- it may be an
+  intranet address.
+
 ## Capture
 
 ```bash
