@@ -1,4 +1,4 @@
-"""satchel add <url> | import <file> | search <query> | list | read <id> | serve"""
+"""satchel add <url> | import <file> | search <query> | list | read <id> | export | serve"""
 from __future__ import annotations
 
 import argparse
@@ -7,7 +7,7 @@ import sqlite3
 import sys
 import zipfile
 
-from . import db
+from . import db, export
 from .capture import add_article
 from .importers import parse_export, run_import
 from .serve import DEFAULT_PORT, serve
@@ -108,6 +108,28 @@ def _do_import(args) -> int:
     return 0
 
 
+def _do_export(args) -> int:
+    conn = db.connect(args.db)
+    try:
+        try:
+            rows = db.full_articles(conn, args.search)
+        except sqlite3.OperationalError:
+            print(f"error: couldn't parse that search query: {args.search!r}", file=sys.stderr)
+            return 1
+    finally:
+        conn.close()
+    if not rows:
+        print("nothing to export", file=sys.stderr)
+        return 1
+    if args.epub:
+        count = export.to_epub(rows, args.epub, title=args.title)
+        print(f"wrote {count} article(s) to {args.epub}")
+    else:
+        written = export.to_markdown(rows, args.markdown)
+        print(f"wrote {len(written)} Markdown file(s) to {args.markdown}")
+    return 0
+
+
 def _do_serve(args) -> int:
     return serve(args.db, port=args.port)
 
@@ -148,6 +170,14 @@ def main(argv: list[str] | None = None) -> int:
     import_p.add_argument("--failures", metavar="FILE", help="write every failed URL and why to FILE")
     import_p.add_argument("-v", "--verbose", action="store_true", help="print each URL as it's fetched")
     import_p.set_defaults(func=_do_import)
+
+    export_p = sub.add_parser("export", help="write articles as Markdown files or one EPUB")
+    target = export_p.add_mutually_exclusive_group(required=True)
+    target.add_argument("--markdown", metavar="DIR", help="one .md file per article, with front matter")
+    target.add_argument("--epub", metavar="FILE", help="one EPUB book, a chapter per article")
+    export_p.add_argument("--search", metavar="QUERY", help="only articles matching this search")
+    export_p.add_argument("--title", default="satchel", help="the EPUB's title (default: satchel)")
+    export_p.set_defaults(func=_do_export)
 
     serve_p = sub.add_parser("serve", help="run a local listener + bookmarklet for one-click capture")
     serve_p.add_argument("--port", type=int, default=DEFAULT_PORT,

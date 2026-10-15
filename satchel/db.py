@@ -96,6 +96,17 @@ def list_all(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute("SELECT id, url, title, author, added_at FROM articles ORDER BY added_at DESC").fetchall()
 
 
+def full_articles(conn: sqlite3.Connection, query: str | None = None) -> list[sqlite3.Row]:
+    """Every column, text included, newest first; only search matches when
+    a query is given."""
+    if not query:
+        return conn.execute("SELECT * FROM articles ORDER BY added_at DESC").fetchall()
+    ids = [row["id"] for row in search(conn, query)]
+    rows = {row["id"]: row for row in conn.execute(
+        f"SELECT * FROM articles WHERE id IN ({','.join('?' * len(ids))})", ids)} if ids else {}
+    return [rows[i] for i in ids]
+
+
 def search(conn: sqlite3.Connection, query: str) -> list[sqlite3.Row]:
     return conn.execute(
         """

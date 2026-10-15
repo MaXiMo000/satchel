@@ -99,8 +99,13 @@ satchel import <file>       # a Pocket/Omnivore/Instapaper/bookmarks export -- s
 satchel list                # everything saved
 satchel search <query>      # full-text search
 satchel read <id>           # print an article's full text
-satchel serve                # one-click capture -- see below
+satchel export --markdown <dir>   # one .md per article, with front matter (Obsidian, any notes app)
+satchel export --epub <file>      # one book, a chapter per article, for an e-reader
+satchel serve                # one-click capture, and a reader in your browser -- see below
 ```
+
+`export` takes `--search <query>` to export only what matches. The EPUB is
+checked in CI by the W3C's own validator, epubcheck.
 
 All commands take `--db path/to/file.db`. The default, if you don't pass
 one, is `~/.local/share/satchel/satchel.db` (respecting `XDG_DATA_HOME`) —
@@ -130,6 +135,11 @@ Two needed fixes to get there:
   that never connected is never sent to archive.org -- it may be an
   intranet address.
 
+Pages that separate paragraphs with `<br><br>` instead of `<p>` (Paul
+Graham's essays, many hand-written sites) used to come back as a single
+line -- "How to Do Great Work" was one 66,000-character paragraph. They
+now keep their paragraphs: 234 of them, for that essay.
+
 ## Capture
 
 ```bash
@@ -147,6 +157,15 @@ Drag the printed link to your bookmarks bar. Click it on any page while
 `serve` is running, and that page goes through the same fetch/extract/save
 pipeline as `satchel add` — no terminal required for the thing you do most
 often.
+
+`serve` also prints a second link: your archive in the browser. A list of
+everything saved, full-text search, and each article as clean, readable
+text, in light or dark to match your system. The pages run no script and
+load nothing from anywhere. Opening the link once sets a cookie that holds
+the same per-run token as the bookmarklet, so nothing else on the machine
+can read the archive, and requests that arrive under any host name but
+`127.0.0.1` or `localhost` are refused, which stops a website from reaching
+it by pointing its own DNS name at your machine.
 
 **This changes the threat model, and it's handled, not ignored.** While
 `serve` is running, any tab open in your browser can send it a request —

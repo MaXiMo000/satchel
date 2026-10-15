@@ -218,6 +218,21 @@ class TestExtract(unittest.TestCase):
         result = extract(FIXTURE)
         self.assertIn("SQLite's FTS5 extension", result["text"])
 
+    def test_double_br_paragraphs_become_paragraphs(self):
+        # The shape of a Paul Graham essay: one element, double <br> between
+        # paragraphs, and the source hard-wrapped inside each paragraph. It
+        # used to come back as a single 66,000-character line.
+        import textwrap
+        paras = [textwrap.fill(f"This paragraph is about {w}, and it runs long enough to read "
+                               "like prose. " * 4, 66) for w in "trains rivers bread clocks maps gardens".split()]
+        html = ("<html><head><title>An essay</title></head><body><table><tr><td><font>"
+                + "<br /><br />".join(paras) + "</font></td></tr></table></body></html>")
+        lines = extract(html)["text"].split("\n")
+        self.assertEqual(len(lines), 6)
+        self.assertTrue(lines[2].startswith("This paragraph is about bread"), lines[2][:40])
+        self.assertTrue(all(len(l) > 250 for l in lines), [len(l) for l in lines])
+        self.assertNotIn("¶", extract(html)["text"])
+
     def test_empty_html_returns_none_not_a_crash(self):
         self.assertIsNone(extract("<html><body></body></html>"))
 
@@ -379,6 +394,73 @@ class TestServe(unittest.TestCase):
                 return resp.status, json.loads(resp.read())
         except urllib.error.HTTPError as exc:
             return exc.code, json.loads(exc.read())
+
+    def _raw(self, port: int, path: str, host: str | None = None, cookie: str | None = None):
+        import http.client
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        headers = {"Host": host or f"127.0.0.1:{port}"}
+        if cookie:
+            headers["Cookie"] = cookie
+        conn.request("GET", path, headers=headers)
+        resp = conn.getresponse()
+        body = resp.read().decode("utf-8")
+        conn.close()
+        return resp.status, dict(resp.getheaders()), body
+
+    def _saved(self, title="Night <b>trains</b>", text="First paragraph.\nSecond one about sleeper cars."):
+        conn = db.connect(self.db_path)
+        article_id = db.add(conn, "https://example.com/trains", title, "Ana Ruiz", text)
+        conn.close()
+        return article_id
+
+    def test_reader_needs_the_printed_link(self):
+        with self._running_server() as (port, token):
+            status, _, _ = self._raw(port, "/")
+        self.assertEqual(status, 403)
+
+    def test_reader_link_sets_a_strict_cookie_and_then_lists_and_reads(self):
+        article_id = self._saved()
+        with self._running_server() as (port, token):
+            status, headers, _ = self._raw(port, f"/?token={token}")
+            self.assertEqual(status, 303)
+            self.assertEqual(headers["Location"], "/")
+            cookie = headers["Set-Cookie"]
+            self.assertIn("HttpOnly", cookie)
+            self.assertIn("SameSite=Strict", cookie)
+            jar = cookie.split(";")[0]
+
+            status, headers, page = self._raw(port, "/", cookie=jar)
+            self.assertEqual(status, 200)
+            self.assertIn("default-src 'none'", headers["Content-Security-Policy"])  # no script can run
+            self.assertIn("Night &lt;b&gt;trains&lt;/b&gt;", page)  # escaped, never markup
+            self.assertNotIn("<b>trains", page)
+
+            status, _, page = self._raw(port, f"/read/{article_id}", cookie=jar)
+            self.assertEqual(status, 200)
+            self.assertIn("<p>Second one about sleeper cars.</p>", page)
+
+            status, _, page = self._raw(port, "/?q=sleeper", cookie=jar)
+            self.assertIn(f"/read/{article_id}", page)
+            status, _, page = self._raw(port, "/?q=%22unbalanced", cookie=jar)
+            self.assertEqual(status, 200)
+            self.assertIn("could not be read", page)
+            status, _, _ = self._raw(port, "/read/999", cookie=jar)
+            self.assertEqual(status, 404)
+
+    def test_reader_refuses_another_host_name_even_with_the_cookie(self):
+        # DNS rebinding: an attacker's own name pointed at 127.0.0.1 reaches
+        # this port, but the request still carries the attacker's Host.
+        self._saved()
+        with self._running_server() as (port, token):
+            status, _, page = self._raw(port, "/", host=f"evil.example:{port}",
+                                        cookie=f"satchel={token}")
+        self.assertEqual(status, 403)
+        self.assertNotIn("trains", page)
+
+    def test_reader_refuses_a_wrong_cookie(self):
+        with self._running_server() as (port, token):
+            status, _, _ = self._raw(port, "/", cookie="satchel=guess")
+        self.assertEqual(status, 403)
 
     def test_wrong_token_is_refused(self):
         with self._running_server() as (port, token):

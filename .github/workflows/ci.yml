@@ -29,6 +29,34 @@ jobs:
       - run: pip install -e .
       - run: python tests/test_satchel.py
       - run: python tests/test_import.py
+      - run: python tests/test_export.py
+
+  epub:
+    # The unit tests check the container and that every document parses;
+    # this runs the W3C's own validator over a real export, so "an e-reader
+    # will open it" is checked by the reference implementation, not assumed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.13"
+      - run: pip install -e .
+      - name: Export a book
+        run: |
+          python - <<'PY'
+          from satchel import db
+          conn = db.connect("s.db")
+          db.add(conn, "https://example.com/a", 'Trains & "tracks"', "Ana Ruiz",
+                 "First paragraph.\nSecond <paragraph> with markup characters.")
+          db.add(conn, "https://example.com/b", None, None, "An article with no title.")
+          PY
+          satchel --db s.db export --epub book.epub
+      - name: Validate with epubcheck
+        run: |
+          curl -fsSL -o epubcheck.zip https://github.com/w3c/epubcheck/releases/download/v5.1.0/epubcheck-5.1.0.zip
+          unzip -q epubcheck.zip
+          java -jar epubcheck-5.1.0/epubcheck.jar book.epub
 
   package:
     # Build and install the distribution on every commit, not only at
