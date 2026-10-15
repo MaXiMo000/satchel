@@ -3,6 +3,9 @@
 **A tiny local archive of the actual things you read.**
 
 [![ci](https://github.com/MaXiMo000/satchel/actions/workflows/ci.yml/badge.svg)](https://github.com/MaXiMo000/satchel/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/satchel-reader)](https://pypi.org/project/satchel-reader/)
+
+<p align="center"><img src="https://raw.githubusercontent.com/MaXiMo000/satchel/main/docs/demo.svg" alt="satchel saving two articles, searching them offline, and reading the saved text" width="100%"></p>
 
 Most "read later" tools save a URL. The link rots, the site adds a
 paywall, or you're offline — and the thing you saved is gone. `satchel`

@@ -36,8 +36,7 @@ satchel = "satchel.cli:main"
 
 [build-system]
 # 77 is the floor for PEP 639 (`license = "MIT"` as an SPDX expression). On
-# 68 a clean build environment can reject it -- learned the hard way in a
-# sibling project's own release workflow, fixed here before it bites this one.
+# 68 a clean build environment can reject it.
 requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 

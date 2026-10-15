@@ -256,7 +256,7 @@ def run_import(conn: sqlite3.Connection, items: list[Item], *, wayback: bool = T
             item.url = url
             to_fetch.append(item)
 
-    # ponytail: plain thread pool, no per-host rate limit; add one if an
+    # A plain thread pool, no per-host rate limit; add one if an
     # import ever hammers a single site.
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(fetch_article, it.url, wayback=wayback): it for it in to_fetch}
