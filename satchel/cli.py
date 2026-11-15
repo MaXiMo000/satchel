@@ -131,7 +131,7 @@ def _do_export(args) -> int:
 
 
 def _do_serve(args) -> int:
-    return serve(args.db, port=args.port)
+    return serve(args.db, port=args.port, keep_token=args.keep_token)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -182,6 +182,9 @@ def main(argv: list[str] | None = None) -> int:
     serve_p = sub.add_parser("serve", help="run a local listener + bookmarklet for one-click capture")
     serve_p.add_argument("--port", type=int, default=DEFAULT_PORT,
                           help=f"port to listen on (default: {DEFAULT_PORT})")
+    serve_p.add_argument("--keep-token", action="store_true",
+                         help="reuse one token across restarts (stored next to the db), "
+                              "so the browser extension stays paired")
     serve_p.set_defaults(func=_do_serve)
 
     args = parser.parse_args(argv)

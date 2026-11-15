@@ -19,15 +19,19 @@ from __future__ import annotations
 import html
 import http.server
 import json
-import sqlite3
+import os
+import pathlib
 import secrets
+import sqlite3
 import sys
 import urllib.parse
 
 from . import db
-from .capture import add_article
+from .capture import add_article, add_page
 
 DEFAULT_PORT = 8765
+# A saved page's HTML; a long article with inline images stays well under this.
+MAX_PAGE_BYTES = 32 * 1024 * 1024
 
 
 def _bookmarklet(port: int, token: str) -> str:
@@ -107,6 +111,10 @@ def _article_page(row) -> bytes:
 
 
 def _make_handler(db_path: str, token: str) -> type[http.server.BaseHTTPRequestHandler]:
+    def token_ok(given: object) -> bool:
+        # Compared as bytes: compare_digest raises on a non-ASCII str.
+        return isinstance(given, str) and secrets.compare_digest(given.encode(), token.encode())
+
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self, fmt: str, *args) -> None:  # noqa: A003 - stdlib's name
             pass  # quiet by default; every response already carries the result
@@ -146,7 +154,7 @@ def _make_handler(db_path: str, token: str) -> type[http.server.BaseHTTPRequestH
             if self.headers.get("Host", "") not in (f"127.0.0.1:{port}", f"localhost:{port}"):
                 return False
             given = qs.get("token", [""])[0]
-            if given and secrets.compare_digest(given, token):
+            if given and token_ok(given):
                 self._html(303, b"", {
                     "Location": urllib.parse.urlsplit(self.path).path,
                     "Set-Cookie": f"{COOKIE}={token}; HttpOnly; SameSite=Strict; Path=/",
@@ -154,7 +162,7 @@ def _make_handler(db_path: str, token: str) -> type[http.server.BaseHTTPRequestH
                 return None
             jar = self.headers.get("Cookie", "")
             held = dict(c.strip().split("=", 1) for c in jar.split(";") if "=" in c).get(COOKIE, "")
-            return bool(held) and secrets.compare_digest(held, token)
+            return bool(held) and token_ok(held)
 
         def _read(self, parsed) -> None:
             qs = urllib.parse.parse_qs(parsed.query)
@@ -197,8 +205,7 @@ def _make_handler(db_path: str, token: str) -> type[http.server.BaseHTTPRequestH
                 return
 
             qs = urllib.parse.parse_qs(parsed.query)
-            given_token = qs.get("token", [""])[0]
-            if not secrets.compare_digest(given_token, token):
+            if not token_ok(qs.get("token", [""])[0]):
                 self._reply(403, {"ok": False, "message": "bad or missing token"})
                 return
 
@@ -214,7 +221,69 @@ def _make_handler(db_path: str, token: str) -> type[http.server.BaseHTTPRequestH
                 conn.close()
             self._reply(200 if result["ok"] else 400, result)
 
+        def do_POST(self) -> None:
+            """The browser extension: {"token", "url", "html"} as a JSON body.
+
+            Sent as text/plain so the browser treats it as a simple request
+            with no CORS preflight. With "html", the page is stored from what
+            the browser already has; without it, the URL is fetched under the
+            same private-network guard as the bookmarklet.
+            """
+            if urllib.parse.urlsplit(self.path).path != "/add":
+                self._reply(404, {"ok": False, "message": "not found"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                length = -1
+            if not 0 < length <= MAX_PAGE_BYTES:
+                self.close_connection = True
+                self._reply(413 if length > MAX_PAGE_BYTES else 400,
+                            {"ok": False, "message": "missing or oversized body"})
+                return
+            try:
+                payload = json.loads(self.rfile.read(length))
+            except ValueError:
+                payload = None
+            if not isinstance(payload, dict):
+                self._reply(400, {"ok": False, "message": "body must be a JSON object"})
+                return
+            if not token_ok(payload.get("token")):
+                self._reply(403, {"ok": False, "message": "bad or missing token"})
+                return
+            url, page = payload.get("url"), payload.get("html")
+            if not isinstance(url, str) or not url:
+                self._reply(400, {"ok": False, "message": "no url given"})
+                return
+
+            conn = db.connect(db_path)
+            try:
+                if isinstance(page, str) and page:
+                    result = add_page(conn, url, page)
+                else:
+                    result = add_article(conn, url, restrict_private_network=True)
+            finally:
+                conn.close()
+            self._reply(200 if result["ok"] else 400, result)
+
     return Handler
+
+
+def kept_token(path: pathlib.Path) -> str:
+    """The token stored at path, creating it (owner-only) on first use, so
+    a paired browser extension keeps working across restarts."""
+    try:
+        held = path.read_text(encoding="ascii").strip()
+    except FileNotFoundError:
+        held = ""
+    if held:
+        return held
+    held = secrets.token_urlsafe(16)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="ascii") as fh:
+        fh.write(held)
+    return held
 
 
 class _StrictPortServer(http.server.HTTPServer):
@@ -233,8 +302,9 @@ class _StrictPortServer(http.server.HTTPServer):
     allow_reuse_address = False
 
 
-def serve(db_path: str, port: int = DEFAULT_PORT) -> int:
-    token = secrets.token_urlsafe(16)
+def serve(db_path: str, port: int = DEFAULT_PORT, keep_token: bool = False) -> int:
+    token_file = pathlib.Path(db_path + ".token")
+    token = kept_token(token_file) if keep_token else secrets.token_urlsafe(16)
     try:
         httpd = _StrictPortServer(("127.0.0.1", port), _make_handler(db_path, token))
     except OSError as exc:
@@ -247,12 +317,20 @@ def serve(db_path: str, port: int = DEFAULT_PORT) -> int:
     print()
     print(f"  {_bookmarklet(port, token)}")
     print()
+    print("Or paste this token into the satchel browser extension:")
+    print()
+    print(f"  {token}")
+    print()
     print("Read and search everything you saved:")
     print()
     print(f"  http://127.0.0.1:{port}/?token={urllib.parse.quote(token)}")
     print()
-    print("Only this machine can reach it, and only with the token above -- restart")
-    print("`serve` and re-drag the bookmarklet if you ever want a fresh one.")
+    if keep_token:
+        print("Only this machine can reach it, and only with the token above, kept in")
+        print(f"{token_file} -- delete that file for a fresh one.")
+    else:
+        print("Only this machine can reach it, and only with the token above -- restart")
+        print("`serve` and re-drag the bookmarklet if you ever want a fresh one.")
     print()
     print("^C to stop.")
     try:

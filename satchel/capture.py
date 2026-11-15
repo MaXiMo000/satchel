@@ -9,7 +9,7 @@ import urllib.error
 
 from . import db
 from .extract import extract
-from .fetch import fetch, normalize_url
+from .fetch import UnsafeURLError, _check_scheme, fetch, normalize_url
 
 
 def add_article(conn: sqlite3.Connection, raw_url: str, *, restrict_private_network: bool = False) -> dict:
@@ -42,8 +42,24 @@ def add_article(conn: sqlite3.Connection, raw_url: str, *, restrict_private_netw
         return {"ok": False, "message": f"could not fetch {url}: {exc}", "id": None}
     # Normalize again after following redirects -- the URL actually served
     # (past a shortener, or an http->https upgrade) is the real dedup key.
-    url = normalize_url(final_url)
+    return _store(conn, normalize_url(final_url), html, source)
 
+
+def add_page(conn: sqlite3.Connection, raw_url: str, html: str) -> dict:
+    """Store a page the browser already has open, from its own HTML.
+
+    Nothing is fetched, so there is no request for an SSRF guard to police,
+    and the saved text is exactly what the reader saw -- including a page
+    behind their own login, which a second fetch could never reach.
+    """
+    try:
+        _check_scheme(raw_url)
+    except UnsafeURLError as exc:
+        return {"ok": False, "message": str(exc), "id": None}
+    return _store(conn, normalize_url(raw_url), html)
+
+
+def _store(conn: sqlite3.Connection, url: str, html: bytes | str, source: str = "") -> dict:
     article = extract(html, url=url)
     if article is None:
         return {"ok": False, "message": f"could not extract article text from {url}", "id": None}

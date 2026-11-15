@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- A browser extension for Chrome and Firefox: one click saves the page you are reading, from its own HTML, including pages behind your login.
+- `satchel serve --keep-token` keeps one token across restarts, so the extension stays paired.
+- `POST /add` on the capture listener, used by the extension.
+
 ## 0.4.1 - 2026-10-16
 
 - Documentation: a demo of real output at the top of the README, a security policy, a changelog, and issue templates.

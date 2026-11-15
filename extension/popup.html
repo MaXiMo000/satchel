@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>satchel</title>
+<style>
+  :root { color-scheme: light dark; --bg: #faf8f3; --ink: #1d1c1a; --muted: #6b6862; --rule: #dedad0; --ok: #2e6b3a; --bad: #9b2c2c; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #191917; --ink: #e8e4da; --muted: #9a968c; --rule: #33322e; --ok: #7fc28c; --bad: #e59a9a; } }
+  body { margin: 0; width: 18rem; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, sans-serif; }
+  main { padding: .9rem 1rem 1rem; }
+  h1 { margin: 0 0 .6rem; font: 600 12px/1 system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  #status { margin: 0 0 .8rem; overflow-wrap: anywhere; }
+  #status.ok { color: var(--ok); }
+  #status.bad { color: var(--bad); }
+  label { display: block; margin: .5rem 0 .2rem; font-size: 12px; color: var(--muted); }
+  input { box-sizing: border-box; width: 100%; padding: .45rem .55rem; border: 1px solid var(--rule); border-radius: 6px; background: transparent; color: inherit; font: 13px ui-monospace, monospace; }
+  .row { display: flex; gap: .5rem; margin-top: .8rem; }
+  button { flex: 1; padding: .5rem .7rem; border: 0; border-radius: 6px; background: var(--ink); color: var(--bg); font: 600 13px system-ui, sans-serif; cursor: pointer; }
+  button.quiet { background: transparent; color: var(--ink); border: 1px solid var(--rule); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--muted); outline-offset: 2px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>satchel</h1>
+  <p id="status" role="status" aria-live="polite"></p>
+
+  <form id="setup" hidden>
+    <label for="token">Token from <code>satchel serve</code></label>
+    <input id="token" autocomplete="off" spellcheck="false" required>
+    <label for="port">Port</label>
+    <input id="port" type="number" min="1" max="65535" value="8765" required>
+    <div class="row"><button type="submit">Save settings</button></div>
+  </form>
+
+  <div class="row" id="actions" hidden>
+    <button id="save">Save this page</button>
+    <button id="open" class="quiet">Open archive</button>
+  </div>
+  <div class="row" id="change" hidden><button id="settings" class="quiet">Change token</button></div>
+</main>
+<script src="popup.js"></script>
+</body>
+</html>
