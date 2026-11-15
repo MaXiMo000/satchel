@@ -202,7 +202,7 @@ class TestFetchDecompression(unittest.TestCase):
 
         from satchel.fetch import fetch
 
-        page = "<html><body><p>Omnivore’s shutdown</p></body></html>".encode("utf-8")
+        page = "<html><body><p>Omnivore’s shutdown</p></body></html>".encode()
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(self):

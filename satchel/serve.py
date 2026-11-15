@@ -32,7 +32,7 @@ DEFAULT_PORT = 8765
 
 def _bookmarklet(port: int, token: str) -> str:
     return (
-        "javascript:fetch('http://127.0.0.1:%d/add?token=%s&url='"
+        "javascript:fetch('http://127.0.0.1:%d/add?token=%s&url='"  # noqa: UP031 - JS source; braces would need escaping
         "+encodeURIComponent(location.href))"
         ".then(r=>r.json()).then(j=>alert(j.message))"
         ".catch(e=>alert('satchel: could not reach the local listener -- is `satchel serve` still running?'))"
@@ -74,7 +74,7 @@ def _page(title: str, body: str) -> bytes:
     return (f"<!doctype html><html lang=en><head><meta charset=utf-8>"
             f"<meta name=viewport content='width=device-width,initial-scale=1'>"
             f"<title>{html.escape(title)}</title><style>{_STYLE}</style></head>"
-            f"<body><main>{body}</main></body></html>").encode("utf-8")
+            f"<body><main>{body}</main></body></html>").encode()
 
 
 def _when(added_at: str | None) -> str:
