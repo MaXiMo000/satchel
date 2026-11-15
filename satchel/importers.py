@@ -183,8 +183,8 @@ def wayback_snapshot(url: str, timeout: float = 15.0) -> str | None:
     # are still encoded, so a URL's own query string can't leak into the
     # API's.
     api = WAYBACK_API + urllib.parse.quote(url, safe=":/")
-    req = urllib.request.Request(api, headers={"User-Agent": "satchel (+https://github.com/MaXiMo000/satchel)"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    req = urllib.request.Request(api, headers={"User-Agent": "satchel (+https://github.com/MaXiMo000/satchel)"})  # noqa: S310 - fixed https API
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
         data = json.load(resp)
     closest = (data.get("archived_snapshots") or {}).get("closest") or {}
     if not closest.get("available") or not closest.get("url") or str(closest.get("status")) != "200":
@@ -215,7 +215,7 @@ def fetch_article(url: str, *, wayback: bool = True) -> tuple[dict | None, str, 
                 article = extract(html_bytes, url=url)
                 if article:
                     return article, url, "wayback"
-        except Exception:  # noqa: BLE001 - the archive being down is just "not found"
+        except Exception:  # noqa: BLE001, S110 - the archive being down is just "not found"
             pass
     return None, final_url, live_error
 

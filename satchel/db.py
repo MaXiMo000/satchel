@@ -103,7 +103,7 @@ def full_articles(conn: sqlite3.Connection, query: str | None = None) -> list[sq
         return conn.execute("SELECT * FROM articles ORDER BY added_at DESC").fetchall()
     ids = [row["id"] for row in search(conn, query)]
     rows = {row["id"]: row for row in conn.execute(
-        f"SELECT * FROM articles WHERE id IN ({','.join('?' * len(ids))})", ids)} if ids else {}
+        f"SELECT * FROM articles WHERE id IN ({','.join('?' * len(ids))})", ids)}  # noqa: S608 - placeholders only if ids else {}
     return [rows[i] for i in ids]
 
 

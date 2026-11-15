@@ -122,7 +122,7 @@ def fetch(url: str, timeout: float = 15.0, restrict_private_network: bool = Fals
         opener = urllib.request.build_opener(_RestrictedRedirectHandler, _tls())
     else:
         opener = urllib.request.build_opener(_tls())
-    req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
+    req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})  # noqa: S310 - _check_scheme above
     with opener.open(req, timeout=timeout) as resp:
         body = resp.read()
         # Some servers compress even when the request never asked (the

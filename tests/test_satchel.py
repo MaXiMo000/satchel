@@ -142,7 +142,6 @@ class TestWaybackFallback(unittest.TestCase):
 
     def _add(self, fetch_error):
         import sqlite3
-        import urllib.error
         from satchel import capture
         conn = sqlite3.connect(":memory:")
         calls = []
