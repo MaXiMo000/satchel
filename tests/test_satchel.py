@@ -508,6 +508,70 @@ class TestServe(unittest.TestCase):
         self.assertFalse(body["ok"])
         self.assertIn("resolves to a non-public address", body["message"])
 
+    def _post(self, port: int, payload, length: str | None = None) -> tuple[int, dict]:
+        import http.client
+        import json
+        body = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        # text/plain, exactly as the extension sends it: a simple request, no preflight.
+        conn.request("POST", "/add", body=body, headers={
+            "Content-Type": "text/plain", "Content-Length": length or str(len(body))})
+        resp = conn.getresponse()
+        result = resp.status, json.loads(resp.read())
+        conn.close()
+        return result
+
+    def test_extension_saves_the_page_it_sends_without_fetching_it(self):
+        with mock.patch("satchel.capture.fetch", side_effect=AssertionError("must not fetch")):
+            with self._running_server() as (port, token):
+                status, body = self._post(port, {"token": token, "url": "https://example.com/some-article",
+                                                 "html": FIXTURE})
+        self.assertEqual(status, 200, body)
+        self.assertTrue(body["ok"])
+        conn = db.connect(self.db_path)
+        rows = db.list_all(conn)
+        conn.close()
+        self.assertEqual([r["url"] for r in rows], ["https://example.com/some-article"])
+
+    def test_extension_post_with_a_wrong_token_is_refused(self):
+        with self._running_server() as (port, token):
+            status, body = self._post(port, {"token": "wrong", "url": "https://example.com/a", "html": FIXTURE})
+        self.assertEqual(status, 403)
+
+    def test_extension_post_without_html_keeps_the_private_network_guard(self):
+        with self._running_server() as (port, token):
+            status, body = self._post(port, {"token": token, "url": "http://169.254.169.254/latest/meta-data/"})
+        self.assertEqual(status, 400)
+        self.assertIn("resolves to a non-public address", body["message"])
+
+    def test_extension_post_refuses_a_non_http_page_url(self):
+        with self._running_server() as (port, token):
+            status, body = self._post(port, {"token": token, "url": "javascript:alert(1)", "html": FIXTURE})
+        self.assertEqual(status, 400)
+        self.assertIn("only http/https", body["message"])
+
+    def test_extension_post_refuses_bad_and_oversized_bodies(self):
+        from satchel.serve import MAX_PAGE_BYTES
+        with self._running_server() as (port, token):
+            self.assertEqual(self._post(port, b"not json")[0], 400)
+            self.assertEqual(self._post(port, [token])[0], 400)
+            self.assertEqual(self._post(port, b"{}", length=str(MAX_PAGE_BYTES + 1))[0], 413)
+
+    def test_a_non_ascii_token_is_refused_not_a_crash(self):
+        with self._running_server() as (port, token):
+            status, _ = self._get(port, "/add?token=%C3%A9&url=https://example.com/a")
+            self.assertEqual(status, 403)
+            self.assertEqual(self._post(port, {"token": "é", "url": "https://example.com/a"})[0], 403)
+
+    def test_kept_token_is_reused_across_restarts(self):
+        from satchel.serve import kept_token
+        path = pathlib.Path(self.tmp.name) / "nested" / "satchel.db.token"
+        first = kept_token(path)
+        self.assertEqual(kept_token(path), first)
+        self.assertGreaterEqual(len(first), 16)
+        if os.name == "posix":
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
     def test_bookmarklet_contains_the_real_port_and_token(self):
         from satchel.serve import _bookmarklet
         js = _bookmarklet(8765, "abc123")

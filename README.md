@@ -59,8 +59,8 @@ the same import twice is safe), and every link that still couldn't be
 saved is listed with the reason (`--failures failed.txt` writes them all
 to a file). Fetches run in parallel (`--workers`, default 8).
 
-Save with one click instead of a terminal: `satchel serve` runs a local
-listener and prints a bookmarklet — click it on any page and that page is
+Save with one click instead of a terminal: the **browser extension**
+(Chrome and Firefox, see "Capture") or `satchel serve`'s bookmarklet — click it on any page and that page is
 saved through the exact same pipeline `add` uses. See "Capture" below.
 
 ## How
@@ -169,6 +169,30 @@ the same per-run token as the bookmarklet, so nothing else on the machine
 can read the archive, and requests that arrive under any host name but
 `127.0.0.1` or `localhost` are refused, which stops a website from reaching
 it by pointing its own DNS name at your machine.
+
+### Browser extension
+
+The extension in [`extension/`](extension/) saves the page you are reading with
+one click. It sends the page's own HTML, so what gets saved is exactly what you
+see, including articles behind your own login, and nothing is downloaded twice.
+
+```bash
+satchel serve --keep-token
+```
+
+`--keep-token` keeps one token across restarts (stored next to the database,
+readable only by you), so you pair the extension once.
+
+- **Chrome, Edge, Brave:** open `chrome://extensions`, turn on Developer mode,
+  choose **Load unpacked** and pick the `extension` folder.
+- **Firefox:** open `about:debugging#/runtime/this-firefox`, choose **Load
+  Temporary Add-on** and pick `extension/manifest.json`.
+
+Click the satchel button, paste the token `serve` printed, and the page is
+saved. After that every click saves straight away; **Open archive** opens the
+reader. The extension asks only for the current tab when you click it
+(`activeTab`), its own settings (`storage`), and `http://127.0.0.1`. It never
+reads a page you haven't clicked it on.
 
 **This changes the threat model, and it's handled, not ignored.** While
 `serve` is running, any tab open in your browser can send it a request —

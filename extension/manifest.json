@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "satchel",
+  "version": "0.5.0",
+  "description": "Save the page you are reading to your local satchel archive.",
+  "action": {
+    "default_title": "Save to satchel",
+    "default_popup": "popup.html"
+  },
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "satchel@maximo000.github.io",
+      "strict_min_version": "128.0"
+    }
+  }
+}
