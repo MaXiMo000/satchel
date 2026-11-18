@@ -17,6 +17,8 @@ def _do_add(args) -> int:
     conn = db.connect(args.db)
     try:
         result = add_article(conn, args.url)
+        if result["ok"] and args.tag:
+            db.add_tags(conn, result["id"], args.tag)
     finally:
         conn.close()
     print(result["message"], file=sys.stdout if result["ok"] else sys.stderr)
@@ -48,14 +50,16 @@ def _do_search(args) -> int:
 def _do_list(args) -> int:
     conn = db.connect(args.db)
     try:
-        rows = db.list_all(conn)
+        rows = db.list_all(conn, tag=args.tag)
     finally:
         conn.close()
     if not rows:
-        print(f"nothing saved yet — try: satchel add <url>  (db: {args.db})")
+        print(f"nothing tagged '{args.tag}'" if args.tag
+              else f"nothing saved yet — try: satchel add <url>  (db: {args.db})")
         return 0
     for row in rows:
-        print(f"#{row['id']:<4} {row['title'] or row['url']}  ({row['added_at']})")
+        tags = f"  [{row['tags']}]" if row["tags"] else ""
+        print(f"#{row['id']:<4} {row['title'] or row['url']}  ({row['added_at']}){tags}")
     return 0
 
 
@@ -63,6 +67,7 @@ def _do_read(args) -> int:
     conn = db.connect(args.db)
     try:
         row = db.get(conn, args.id)
+        tags = db.tags_for(conn, args.id) if row is not None else []
     finally:
         conn.close()
     if row is None:
@@ -71,6 +76,8 @@ def _do_read(args) -> int:
     print(row["title"] or row["url"])
     if row["author"]:
         print(f"by {row['author']}")
+    if tags:
+        print(f"tags: {', '.join(tags)}")
     print()
     print(row["text"])
     return 0
@@ -148,6 +155,7 @@ def main(argv: list[str] | None = None) -> int:
 
     add_p = sub.add_parser("add", help="fetch a URL, extract the article, save it")
     add_p.add_argument("url")
+    add_p.add_argument("--tag", action="append", default=[], help="tag it (repeatable)")
     add_p.set_defaults(func=_do_add)
 
     search_p = sub.add_parser("search", help="full-text search saved articles")
@@ -155,6 +163,7 @@ def main(argv: list[str] | None = None) -> int:
     search_p.set_defaults(func=_do_search)
 
     list_p = sub.add_parser("list", help="list everything saved")
+    list_p.add_argument("--tag", help="only articles with this tag")
     list_p.set_defaults(func=_do_list)
 
     read_p = sub.add_parser("read", help="print a saved article's full text")

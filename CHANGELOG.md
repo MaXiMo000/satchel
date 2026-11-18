@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Tags: imports bring over Pocket tags (CSV and `ril_export.html`), Omnivore labels and Firefox bookmark tags; re-running an import adds them to articles already saved. `satchel add --tag`, `satchel list --tag`, and tags in `list` and `read`.
+
 ## 0.5.0 - 2026-11-18
 
 - A browser extension for Chrome and Firefox: one click saves the page you are reading, from its own HTML, including pages behind your login.
