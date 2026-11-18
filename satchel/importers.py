@@ -46,6 +46,7 @@ class Item:
     author: str | None = None
     added_at: str | None = None   # ISO 8601, UTC
     text: str | None = None       # already-extracted text (Omnivore); None means fetch it
+    tags: list[str] | None = None
 
 
 def _iso(unix_seconds) -> str | None:
@@ -85,8 +86,10 @@ def _parse_omnivore(root: pathlib.Path) -> list[Item]:
                 content = root / "content" / f"{slug}.md"
                 if content.is_file():
                     text = content.read_text(encoding="utf-8").strip() or None
+            labels = [lab.get("name") if isinstance(lab, dict) else lab for lab in entry.get("labels") or []]
             items.append(Item(url=url, title=entry.get("title"), author=entry.get("author"),
-                              added_at=_iso_string(entry.get("savedAt")), text=text))
+                              added_at=_iso_string(entry.get("savedAt")), text=text,
+                              tags=[lab for lab in labels if isinstance(lab, str)]))
     return items
 
 
@@ -111,8 +114,10 @@ def _parse_csv(path: pathlib.Path) -> tuple[str, list[Item]]:
         kind, date_col = "csv", None
     else:
         raise ValueError(f"{path.name}: a CSV import needs a 'url' column (found: {', '.join(sorted(cols))})")
+    # Pocket's CSV separates tags with "|" (as other Pocket importers read it; there is no published spec).
     items = [Item(url=get(r, "url"), title=get(r, "title") or None,
-                  added_at=_iso(get(r, date_col)) if date_col else None)
+                  added_at=_iso(get(r, date_col)) if date_col else None,
+                  tags=get(r, "tags").split("|") if kind == "pocket" else None)
              for r in rows if get(r, "url")]
     return kind, items
 
@@ -131,7 +136,9 @@ class _LinkParser(html.parser.HTMLParser):
             return
         a = dict(attrs)
         if a.get("href"):
-            self._current = Item(url=a["href"], added_at=_iso(a.get("add_date") or a.get("time_added")))
+            # tags="a,b": Pocket's ril_export.html and Firefox bookmarks.
+            self._current = Item(url=a["href"], added_at=_iso(a.get("add_date") or a.get("time_added")),
+                                 tags=(a.get("tags") or "").split(","))
 
     def handle_data(self, data):
         if self._current is not None and data.strip():
@@ -231,13 +238,14 @@ def run_import(conn: sqlite3.Connection, items: list[Item], *, wayback: bool = T
     to_fetch: list[Item] = []
     seen: set[str] = set()
 
-    def save(url, title, author, text, added_at) -> None:
+    def save(url, title, author, text, added_at, tags) -> None:
         try:
             db.add(conn, url, title, author, text, added_at=added_at)
             have.add(url)
             counts["saved"] += 1
         except sqlite3.IntegrityError:
             counts["skipped"] += 1
+        db.add_tags_by_url(conn, url, tags)
 
     for item in items:
         if not item.url.startswith(("http://", "https://")):
@@ -246,11 +254,14 @@ def run_import(conn: sqlite3.Connection, items: list[Item], *, wayback: bool = T
             continue
         url = normalize_url(item.url)
         if url in have or url in seen:
+            # Already saved, by an earlier import or an earlier line: its tags
+            # still count, so re-running an import brings tags over.
+            db.add_tags_by_url(conn, url, item.tags)
             counts["skipped"] += 1
             continue
         seen.add(url)
         if item.text:
-            save(url, item.title, item.author, item.text, item.added_at)
+            save(url, item.title, item.author, item.text, item.added_at, item.tags)
             counts["from_export"] += 1
         else:
             item.url = url
@@ -270,7 +281,7 @@ def run_import(conn: sqlite3.Connection, items: list[Item], *, wayback: bool = T
                 continue
             # Keyed on the saved URL, not the post-redirect one, so importing
             # the same export twice recognizes every item the second time.
-            save(it.url, article["title"] or it.title, article["author"], article["text"], it.added_at)
+            save(it.url, article["title"] or it.title, article["author"], article["text"], it.added_at, it.tags)
             if source == "wayback":
                 counts["from_wayback"] += 1
             progress(f"[{done}/{len(to_fetch)}] {source:7} {it.url}")

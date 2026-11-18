@@ -54,8 +54,10 @@ saved 2 (0 from the export itself, 1 rescued from the Wayback Machine), 0 alread
 Links saved years ago are often dead. When the live page is gone, satchel
 fetches the closest **Wayback Machine** snapshot instead, so link rot
 doesn't mean the article is lost (`--no-wayback` to skip it). Each article
-keeps the date you originally saved it, duplicates are skipped (so running
-the same import twice is safe), and every link that still couldn't be
+keeps the date you originally saved it and its tags (Pocket's tags,
+Omnivore's labels, Firefox bookmark tags), duplicates are skipped (so running
+the same import twice is safe, and running it again after upgrading brings
+tags over for articles you already imported), and every link that still couldn't be
 saved is listed with the reason (`--failures failed.txt` writes them all
 to a file). Fetches run in parallel (`--workers`, default 8).
 
@@ -97,9 +99,9 @@ pip install -e .
 ## Use
 
 ```bash
-satchel add <url>          # fetch, extract, save
+satchel add <url>          # fetch, extract, save (--tag NAME, repeatable)
 satchel import <file>       # a Pocket/Omnivore/Instapaper/bookmarks export -- see above
-satchel list                # everything saved
+satchel list                # everything saved, with its tags (--tag NAME to filter)
 satchel search <query>      # full-text search
 satchel read <id>           # print an article's full text
 satchel export --markdown <dir>   # one .md per article, with front matter (Obsidian, any notes app)
@@ -246,7 +248,7 @@ whether the door itself works.
 
 ## What's deliberately not here yet
 
-No tags (an import doesn't bring Pocket tags over yet), no folders, no read/unread state — a flat list plus full-text
+No folders, no read/unread state — a flat list plus full-text
 search covers the actual workflow (encounter → capture → search → read);
 add these when a flat list genuinely stops being enough, not before. No
 multi-device sync — one local file is the whole pitch, and sync is a

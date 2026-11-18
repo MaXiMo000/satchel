@@ -45,6 +45,12 @@ class TestParsers(unittest.TestCase):
         self.assertEqual([i.url for i in items], ["https://example.com/lfs", "https://example.com/b"])
         self.assertEqual(items[0].title, "Local-first software")
         self.assertEqual(items[0].added_at, "2016-01-01T00:00:00Z")
+        self.assertEqual(items[0].tags, ["essays"])
+
+    def test_pocket_csv_with_several_tags(self):
+        p = self._write("part_000001.csv", "title,url,time_added,tags,status\n"
+                        "A,https://example.com/a,1451606400,python|local-first,unread\n")
+        self.assertEqual(importers.parse_export(p)[1][0].tags, ["python", "local-first"])
 
     def test_instapaper_csv(self):
         p = self._write("instapaper-export.csv",
@@ -82,6 +88,7 @@ class TestParsers(unittest.TestCase):
         kind, items = importers.parse_export(p)
         self.assertEqual(kind, "pocket")
         self.assertEqual(items[0].added_at, "2016-01-01T00:00:00Z")
+        self.assertEqual(items[0].tags, ["x"])
 
     def test_plain_url_list(self):
         p = self._write("urls.txt", "https://example.com/1\n\n# a comment\nnot a url\nhttp://example.com/2\n")
@@ -94,7 +101,7 @@ class TestParsers(unittest.TestCase):
         (root / "content").mkdir(parents=True)
         (root / "metadata_0_to_2.json").write_text(json.dumps([
             {"id": "1", "slug": "saved-with-text", "title": "Has text", "author": "Ada",
-             "url": "https://example.com/o1", "savedAt": "2023-05-01T10:00:00.000Z", "labels": []},
+             "url": "https://example.com/o1", "savedAt": "2023-05-01T10:00:00.000Z", "labels": ["Newsletter"]},
             {"id": "2", "slug": "no-content-file", "title": "Link only",
              "url": "https://example.com/o2", "savedAt": "2023-06-01T10:00:00.000Z"},
         ]), encoding="utf-8")
@@ -108,6 +115,7 @@ class TestParsers(unittest.TestCase):
         self.assertEqual(items[0].author, "Ada")
         self.assertEqual(items[0].added_at, "2023-05-01T10:00:00Z")
         self.assertIsNone(items[1].text)  # no content file: will be fetched
+        self.assertEqual((items[0].tags, items[1].tags), (["Newsletter"], []))
 
     def test_omnivore_zip(self):
         root = self._omnivore_folder()
@@ -191,6 +199,21 @@ class TestRunImport(unittest.TestCase):
         self.assertEqual(first["saved"], 1)
         self.assertEqual((second["saved"], second["skipped"]), (0, 2))
 
+
+    def test_tags_come_over_and_a_reimport_adds_them_to_saved_articles(self):
+        live = {"https://example.com/live": "b"}
+        self._run([importers.Item(url="https://example.com/live")], live=live, archived={})
+        self.assertIsNone(db.list_all(self.conn)[0]["tags"])  # imported before tags existed
+        again = [importers.Item(url="https://example.com/live", tags=["Python", "essays", "python ", ""]),
+                 importers.Item(url="https://example.com/inline", text="body", tags=["essays"])]
+        result = self._run(again, live=live, archived={})
+        self.assertEqual((result["saved"], result["skipped"]), (1, 1))
+        rows = {r["url"]: r["tags"] for r in db.list_all(self.conn)}
+        self.assertEqual(rows, {"https://example.com/live": "essays, python",
+                                "https://example.com/inline": "essays"})
+        self.assertEqual([r["url"] for r in db.list_all(self.conn, tag="Python")], ["https://example.com/live"])
+        self.assertEqual(len(db.list_all(self.conn, tag="essays")), 2)
+        self.assertEqual(db.list_all(self.conn, tag="nope"), [])
 
 class TestFetchDecompression(unittest.TestCase):
     def test_a_gzip_response_nobody_asked_for_is_decompressed(self):
